@@ -6,7 +6,7 @@ This application is an intelligent music request system that uses the Claude API
 
 This project provides a robust, API-based interface for understanding the user's natural languame request and identifying the Sonos accessible track that best matches that request. It handles complex cases like possessive forms ("Neil Young's Harvest"), version preferences ("live version of..."), and automatically recovers from Sonos search failures by reformulating a search to use an album-based search strategy based on knowledge from its training data set.
 
-**Note**: This Claude API integration replaces a previous approach that attempted to use built-in Claude Code Task function behavior that turned out to frequently employ mock functions instead of the intended general-purpose agent behavior.  There are still remnants of this abandoned approach that should be removed from the code since there is no intention of reverting to that failed approach. There were also efforts to detect whether claude code was in interactive mode or headless mode and that code is also not useful with regard to the successful API approach that has been implemented. That code should also be removed to avoid confusion.
+**Note**: This Claude API integration replaces a previous approach that attempted to use built-in Claude Code Task function behavior that turned out to frequently employ mock functions instead of the intended general-purpose agent behavior. All legacy code from that abandoned approach has been removed, leaving only the robust, reliable API-based workflow.
 
 ## Key Features
 
