@@ -40,19 +40,17 @@ This project provides a robust, API-based interface for understanding the user's
 
 ```
 claude_api_client.py         # Claude API client (ClaudeAPIClient class) with LLM parsing and selection methods
-claude_music_interface.py    # Main interface including the ClaudeCodeMusicAgent class, which is derived from the MusicAgent class
-music_agent.py               # Base music agent (MusicAgent class) with search and selection methods  
+claude_music_interface.py    # Main interface with unified MusicAgent class containing all functionality
 music_parsing_prompts.py     # Standardized prompts for consistent behavior
 ```
 
 ### Key Classes
 
 - **`ClaudeAPIClient`**: Direct API client for parsing and track selection
-- **`ClaudeCodeMusicAgent`**: Derived from MusicAgent class and connected to ClaudeAPIClient
-- **`MusicAgent`**: Base agent with programmatic search and selection
+- **`MusicAgent`**: Unified intelligent agent with both API-powered and programmatic capabilities
 - **Main function**: `handle_music_request(request)` - simplified, reliable entry point
 
-**Note**: The `ClaudeCodeMusicAgent` class name is a holdover from the previous approach that used Claude Code Task functions. It should be renamed to something like `ClaudeMusicAgent` to avoid confusion.  Also, the `claude_music_interface.py` file name is also a holdover from the previous approach and should be renamed to something like `music_interface.py`. And lastly, not sure if the separate base class of MusicAgent and the derived class of ClaudeCodeMusicAgent is necessary since there is no intention of having other types of agents.  This could be simplified by merging the two classes into one class.
+**Architecture**: The `MusicAgent` class now contains all functionality in a single, cohesive unit. When an API client is available, it uses Claude API for parsing and intelligent selection. When the API client is unavailable, it gracefully falls back to programmatic methods. This unified approach eliminates unnecessary inheritance complexity while preserving all capabilities.
 
 #### Natural Language Patterns
 - **User request triggers search and best match*: "[play] [song/artist]"
