@@ -23,7 +23,7 @@ def log_progress(message: str):
     
     # Write to log file for headless mode monitoring
     try:
-        log_file = os.path.expanduser("~/.claude_music_progress.log")
+        log_file = os.path.expanduser(".claude_music_progress.log")
         with open(log_file, "a") as f:
             f.write(log_message + "\n")
             f.flush()

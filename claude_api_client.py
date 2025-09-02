@@ -52,7 +52,7 @@ def log_progress(message: str):
     log_message = f"[{timestamp}] 🎵 API {message}"
     
     try:
-        log_file = os.path.expanduser("~/.claude_music_progress.log")
+        log_file = os.path.expanduser(".claude_music_progress.log")
         with open(log_file, "a") as f:
             f.write(log_message + "\n")
             f.flush()
