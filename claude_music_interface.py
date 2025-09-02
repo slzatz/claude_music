@@ -128,124 +128,58 @@ def _fallback_simple_parse(user_request: str) -> Dict[str, Any]:
 
 class ClaudeCodeMusicAgent(MusicAgent):
     """
-    Enhanced MusicAgent that integrates with Claude Code's Task subagent capabilities.
+    Enhanced MusicAgent that integrates with Claude API for reliable LLM capabilities.
     
-    This subclass overrides methods to use standardized prompts instead of ad-hoc prompts,
-    and integrates with Claude Code's Task tool for LLM-powered result selection.
+    This subclass overrides methods to use direct Claude API calls instead of
+    the unreliable Task function, eliminating mock response issues.
     """
     
-    def __init__(self, task_function=None):
+    def __init__(self, api_client=None):
         super().__init__()
-        self.task_function = task_function
-    
-    def _call_selection_subagent(self, prompt: str, _retry_count=0) -> str:
-        """
-        Call Claude Code Task subagent for intelligent music selection.
-        
-        This method uses the Task function when available (provided during initialization)
-        or falls back to programmatic selection.
-        """
-        log_progress(f"🔧 _call_selection_subagent called with task_function: {self.task_function is not None} (attempt {_retry_count + 1})")
-        
-        if self.task_function:
+        # Import here to avoid circular imports
+        if api_client is None:
             try:
-                log_progress(f"🤖 Calling Task subagent for LLM selection...")
-                # Add variation to avoid Claude Code thinking this is a repeated test
-                variation_suffix = ["", " (retry attempt)", " (final attempt)"][min(_retry_count, 2)]
-                result = self.task_function(
-                    description=f"Choose best music track for real playback (not test){variation_suffix}",
-                    prompt=prompt,
-                    subagent_type="general-purpose"
-                )
-                log_progress(f"🤖 Task subagent returned: type={type(result)}, value='{result}', length={len(str(result)) if result else 0}")
-                
-                # Check for mock responses and retry if detected
-                if result and "mock" in str(result).lower():
-                    log_progress(f"🤖 DETECTED MOCK RESPONSE in selection: '{result}' - Claude Code is using mock implementation")
-                    
-                    if _retry_count < 2:  # Allow up to 3 total attempts
-                        log_progress(f"🔄 RETRYING LLM selection (attempt {_retry_count + 2}/3) to get real LLM response...")
-                        import time
-                        time.sleep(1)  # Brief pause before retry
-                        return self._call_selection_subagent(prompt, _retry_count + 1)
-                    else:
-                        log_progress("🚫 Max retries reached for LLM selection, mock responses persist - will use programmatic fallback")
-                        return ""
-                
-                return result if result else ""
+                from claude_api_client import get_api_client
+                api_client = get_api_client()
             except Exception as e:
-                log_progress(f"❌ Task subagent failed with exception: {type(e).__name__}: {e}")
-                log_progress(f"❌ Task subagent traceback: {traceback.format_exc()}")
-                return ""
-        else:
-            log_progress(f"❌ No task_function available, returning empty string")
-            return ""
+                log_progress(f"❌ Could not initialize API client: {e}")
+                api_client = None
+        self.api_client = api_client
+    
     
     def _llm_select_best_match(self, results, target_title: str, 
                               target_artist: str = None, preferences = None):
         """
-        Use standardized prompt template for LLM-powered result selection.
+        Use Claude API for reliable LLM-powered result selection.
         
-        This overrides the base class method to use consistent prompt templates
-        instead of ad-hoc prompt generation.
+        This method now uses direct API calls for consistent selection behavior
+        without the mock response issues of the Task function approach.
         """
-        # Log mode for debugging purposes but always try LLM selection
-        mode = "headless" if is_headless_mode() else "interactive"
-        log_progress(f"🔍 Detected mode: {mode} - attempting LLM selection")
+        if not self.api_client:
+            log_progress("❌ No API client available for LLM selection")
+            return None
+            
+        log_progress(f"🎯 Using API for track selection from {len(results)} results")
         
         try:
-            from music_parsing_prompts import format_result_selection_prompt
-            
-            # Generate standardized prompt using template
-            base_prompt = format_result_selection_prompt(
-                title=target_title,
-                artist=target_artist, 
-                preferences=preferences or {},
-                results=results
+            # Use the API client for reliable selection
+            position = self.api_client.select_best_track(
+                results=results,
+                target_title=target_title, 
+                target_artist=target_artist,
+                preferences=preferences or {}
             )
-            prompt = f"REAL REQUEST - NOT A TEST OR MOCK: This is an actual user request for music selection.\n\n{base_prompt}"
             
-            if not prompt:
+            if position:
+                log_progress(f"✅ API selected position: {position}")
+                return position
+            else:
+                log_progress("❌ API selection returned no result")
                 return None
                 
-            # Call Task subagent for selection
-            log_progress(f"Calling LLM with prompt (first 200 chars): '{prompt[:200]}...'")
-            result = self._call_selection_subagent(prompt)
-            log_progress(f"Raw LLM result type: {type(result)}, length: {len(str(result)) if result else 0}")
-            
-            # Parse result to get position number
-            if result and result.strip():
-                log_progress(f"LLM returned: '{result.strip()}'")
-                try:
-                    position_str = result.strip().split()[0]
-                    log_progress(f"First word from LLM: '{position_str}'")
-                    position = int(position_str)  # Get first number
-                    log_progress(f"Parsed position: {position}")
-                    
-                    # Debug: Show available positions
-                    available_positions = [r['position'] for r in results]
-                    log_progress(f"Available positions: {available_positions[:10]}...")  # Show first 10
-                    
-                    # Validate position is in results
-                    if any(r['position'] == position for r in results):
-                        log_progress(f"✅ Position {position} found in results - returning success")
-                        return position
-                    else:
-                        log_progress(f"❌ Position {position} NOT found in available positions")
-                        log_progress(f"Available positions: {available_positions}")
-                except (ValueError, IndexError) as e:
-                    log_progress(f"❌ Failed to parse LLM position response: {e}")
-                    log_progress(f"LLM response was: '{result}'")
-            else:
-                log_progress(f"❌ LLM returned empty result: result='{result}', stripped='{result.strip() if result else None}'")
-            
-        except ImportError:
-            print("music_parsing_prompts not found, falling back to programmatic selection")
-            return None
         except Exception as e:
-            print(f"Standardized LLM selection error: {e}")
-        
-        return None
+            log_progress(f"❌ API selection error: {str(e)}")
+            return None
     
     def _intelligent_match_selection(self, results, target_title: str, target_artist: str = None, preferences = None):
         """
@@ -330,9 +264,9 @@ class ClaudeCodeMusicAgent(MusicAgent):
                 return True
         return False
     
-    def _get_album_for_song(self, title: str, artist: str = None, _retry_count=0) -> str:
+    def _get_album_for_song(self, title: str, artist: str = None) -> str:
         """
-        Use LLM to identify the primary album that contains a specific song.
+        Use Claude API to identify the primary album that contains a specific song.
         
         This method is called when API parsing fails, allowing us to search by album
         instead of song title, which often avoids parsing issues.
@@ -340,17 +274,17 @@ class ClaudeCodeMusicAgent(MusicAgent):
         Args:
             title: Song title
             artist: Artist name (optional but recommended)
-            _retry_count: Internal retry counter
             
         Returns:
             Album name string, or empty string if lookup fails
         """
-        if not self.task_function:
-            log_progress("❌ No task_function available for album lookup")
+        if not self.api_client:
+            log_progress("❌ No API client available for album lookup")
             return ""
         
         try:
             artist_part = f" by {artist}" if artist else ""
+            log_progress(f"🔍 Looking up album for '{title}'{artist_part}...")
             
             # Create a focused prompt for album identification
             prompt = f"""Identify the primary album that contains the song "{title}"{artist_part}.
@@ -365,160 +299,63 @@ Examples:
 Song: "{title}"{artist_part}
 Album:"""
             
-            log_progress(f"🔍 Looking up album for '{title}'{artist_part}...")
-            
-            # Add variation to avoid Claude Code thinking this is a repeated test
-            variation_suffix = ["", " (retry attempt)", " (final attempt)"][min(_retry_count, 2)]
-            result = self.task_function(
-                description=f"Find album containing song '{title}'{variation_suffix}",
-                prompt=prompt,
-                subagent_type="general-purpose"
+            # Use API client for album lookup
+            response = self.api_client.client.messages.create(
+                model=self.api_client.model,
+                max_tokens=50,
+                temperature=0.0,  # Deterministic responses
+                messages=[{"role": "user", "content": prompt}]
             )
             
-            # Check for mock responses and retry if detected
-            if result and "mock" in str(result).lower():
-                log_progress(f"🤖 DETECTED MOCK RESPONSE in album lookup: '{result}' - retrying...")
-                
-                if _retry_count < 2:  # Allow up to 3 total attempts
-                    log_progress(f"🔄 RETRYING album lookup (attempt {_retry_count + 2}/3)...")
-                    import time
-                    time.sleep(1)  # Brief pause before retry
-                    return self._get_album_for_song(title, artist, _retry_count + 1)
-                else:
-                    log_progress("🚫 Max retries reached for album lookup, mock responses persist")
-                    return ""
+            result = response.content[0].text.strip()
             
-            if result and result.strip():
-                album_name = result.strip()
-                log_progress(f"✅ Album lookup successful: '{album_name}'")
-                return album_name
+            if result:
+                log_progress(f"✅ Album lookup successful: '{result}'")
+                return result
             else:
-                log_progress(f"❌ Album lookup returned empty result")
+                log_progress("❌ Album lookup returned empty result")
                 return ""
                 
         except Exception as e:
             log_progress(f"❌ Album lookup failed with exception: {type(e).__name__}: {e}")
             return ""
     
-    def parse_music_request(self, request: str, _retry_count=0) -> Dict[str, Any]:
+    def parse_music_request(self, request: str) -> Dict[str, Any]:
         """
-        Parse a natural language music request using LLM capabilities with consistent Task function access.
+        Parse a natural language music request using Claude API.
         
-        This method is now part of the agent class to ensure consistent task_function usage.
+        This method now uses direct API calls for reliable, consistent parsing
+        without the mock response issues of the Task function approach.
         
         Args:
             request: Natural language music request (e.g., "play Bruce Springsteen's Thunder Road")
-            _retry_count: Internal retry counter
             
         Returns:
             Dict with parsed components: {'title': str, 'artist': str|None, 'preferences': dict}
         """
-        if not self.task_function:
-            return {
-                'error': 'Task function required - this must be called from Claude Code session',
-                'original_request': request,
-                'message': 'Agent must be created with task_function=Task when calling from Claude Code'
-            }
+        if not self.api_client:
+            log_progress("❌ No API client available - falling back to simple parsing")
+            return _fallback_simple_parse(request)
         
-        # Log mode for debugging purposes but always try LLM first
-        mode = "headless" if is_headless_mode() else "interactive"
-        log_progress(f"🔍 Detected mode: {mode} - attempting LLM parsing")
+        log_progress(f"🎯 Parsing with API: '{request[:50]}...'")
         
         try:
-            from music_parsing_prompts import STANDARD_MUSIC_PARSING_PROMPT
+            # Use the API client for reliable parsing
+            result = self.api_client.parse_music_request(request)
             
-            # Format the standardized prompt with the actual request
-            base_prompt = STANDARD_MUSIC_PARSING_PROMPT.format(request=request)
-            prompt = f"REAL REQUEST - NOT A TEST OR MOCK: This is an actual user request for music playback.\n\n{base_prompt}"
+            # Check for API errors
+            if 'error' in result:
+                log_progress(f"❌ API parsing error: {result['error']}")
+                log_progress("🔄 Falling back to simple regex parsing")
+                return _fallback_simple_parse(request)
             
-            # Call Claude Code's Task tool with standardized prompt
-            log_progress(f"Calling LLM parsing subagent... (attempt {_retry_count + 1})")
-            # Add variation to avoid Claude Code thinking this is a repeated test
-            variation_suffix = ["", " (retry attempt)", " (final attempt)"][min(_retry_count, 2)]
+            log_progress("✅ API parsing completed successfully")
+            return result
             
-            # Use self.task_function for consistency with other agent methods
-            result = self.task_function(
-                description=f"Extract song title and artist from: '{request[:50]}...'{variation_suffix}",
-                prompt=prompt,
-                subagent_type="general-purpose"
-            )
-            
-            # Check for mock responses and retry if detected
-            if result and "mock" in str(result).lower():
-                log_progress(f"🤖 DETECTED MOCK RESPONSE: '{result}' - Claude Code is using mock implementation")
-                
-                if _retry_count < 2:  # Allow up to 3 total attempts
-                    log_progress(f"🔄 RETRYING LLM parsing (attempt {_retry_count + 2}/3) to get real LLM response...")
-                    import time
-                    time.sleep(1)  # Brief pause before retry
-                    return self.parse_music_request(request, _retry_count + 1)
-                else:
-                    log_progress("🚫 Max retries reached, mock responses persist - falling back to regex parsing")
-            
-            # Also check for clearly non-JSON responses and retry
-            elif result and isinstance(result, str):
-                # Quick check if this looks like a non-JSON response
-                result_lower = str(result).lower().strip()
-                non_json_indicators = [
-                    "task completed", "i can help", "here is", "the song", 
-                    "based on", "analyzing", "this appears", "i'll parse"
-                ]
-                
-                if any(indicator in result_lower for indicator in non_json_indicators):
-                    log_progress(f"🤖 DETECTED NON-JSON RESPONSE: '{result[:50]}...' - LLM returned explanatory text instead of JSON")
-                    
-                    if _retry_count < 2:  # Allow up to 3 total attempts
-                        log_progress(f"🔄 RETRYING LLM parsing (attempt {_retry_count + 2}/3) to get proper JSON response...")
-                        import time
-                        time.sleep(1)  # Brief pause before retry
-                        return self.parse_music_request(request, _retry_count + 1)
-                    else:
-                        log_progress("🚫 Max retries reached, non-JSON responses persist - falling back to regex parsing")
-            
-            log_progress("LLM parsing completed")
-            
-            # The LLM should return JSON, but handle string responses too
-            if isinstance(result, str):
-                import json
-                try:
-                    parsed_result = json.loads(result)
-                    return parsed_result
-                except json.JSONDecodeError as e:
-                    # If not valid JSON, try to extract useful info anyway
-                    log_progress(f"LLM parsing returned non-JSON: '{result}' (JSON error: {str(e)})")
-                    log_progress("Falling back to simple regex parsing")
-                    
-                    # Try to extract basic info from the non-JSON response
-                    try:
-                        # Maybe the LLM returned something like "title: 'late for the sky', artist: 'jackson browne'"
-                        import re
-                        title_match = re.search(r"title[:\s]*['\"]([^'\"]+)['\"]", result.lower())
-                        artist_match = re.search(r"artist[:\s]*['\"]([^'\"]+)['\"]", result.lower())
-                        
-                        if title_match:
-                            return {
-                                'title': title_match.group(1),
-                                'artist': artist_match.group(1) if artist_match else None,
-                                'preferences': {}
-                            }
-                    except:
-                        pass
-                    
-                    return _fallback_simple_parse(request)
-            else:
-                # Result is already a dict/object
-                return result
-                
-        except ImportError:
-            return {
-                'error': 'music_parsing_prompts module not found',
-                'original_request': request
-            }
         except Exception as e:
-            return {
-                'error': f'Parsing failed: {str(e)}',
-                'original_request': request
-            }
+            log_progress(f"❌ Unexpected error in API parsing: {str(e)}")
+            log_progress("🔄 Falling back to simple regex parsing")
+            return _fallback_simple_parse(request)
     
     def handle_parsed_music_request(self, title: str, artist: str = None, preferences: Dict[str, Any] = None) -> Dict[str, Any]:
         """
@@ -857,72 +694,38 @@ def play_music_parsed_with_llm(title: str, artist: str = None, preferences: Dict
             return f"❌ {result['message']}"
 
 
-def handle_music_request(user_request: str, task_function=None, verbose: bool = False) -> str:
+def handle_music_request(user_request: str, api_client=None, verbose: bool = False) -> str:
     """
-    Complete end-to-end music request handler for Claude Code.
+    Complete end-to-end music request handler using Claude API.
     
-    This is the main entry point that matches the workflow described in CLAUDE.md.
-    Combines LLM parsing with intelligent music selection for optimal results.
+    This is the main entry point that provides reliable LLM-powered music processing
+    without the mock response issues of the Task function approach.
     
     Args:
         user_request: Natural language music request (e.g., "play Bruce Springsteen's Thunder Road")
-        task_function: Claude Code's Task function (required for LLM features)
+        api_client: Optional Claude API client (will create one if not provided)
         verbose: Whether to return detailed information about the process
         
     Returns:
         Human-readable message about the result
         
     Example:
-        result = handle_music_request("play Bruce Springsteen's Thunder Road", task_function=Task)
+        result = handle_music_request("play Bruce Springsteen's Thunder Road")
     """
-    # Early exception catching to identify early failures
     try:
         start_time = datetime.now()
         
-        # Debug: Track call stack to detect loops
+        # Show process info for debugging
         import os
-        call_stack = traceback.extract_stack()
-        handle_music_request_calls = [frame for frame in call_stack if 'handle_music_request' in frame.name]
-        
-        # Show process info to understand multiple calls
         pid = os.getpid()
-        log_progress(f"🎯 [ENTRY] Processing music request: '{user_request}' (PID: {pid})")
-    except Exception as e:
-        # If we can't even get to basic logging, catch and report it
-        try:
-            log_progress(f"💥 CRITICAL: Early failure in handle_music_request: {type(e).__name__}: {e}")
-            log_progress(f"💥 CRITICAL: Traceback: {traceback.format_exc()}")
-        except:
-            # Last resort - print to stderr if even logging fails
-            import sys
-            print(f"FATAL: Complete failure in handle_music_request: {e}", file=sys.stderr)
-        return f"❌ Critical error: {e}"
-    
-    if len(handle_music_request_calls) > 1:
-        log_progress(f"🔄 WARNING: handle_music_request called recursively! Call depth: {len(handle_music_request_calls)}")
-        for i, frame in enumerate(handle_music_request_calls):
-            log_progress(f"  {i+1}. {frame.filename}:{frame.lineno} in {frame.name}")
-    
-    # Show relevant stack frames to understand the calling context
-    relevant_frames = [frame for frame in call_stack[-10:] if not frame.filename.endswith('traceback.py')]
-    log_progress(f"📍 Call stack (last 5 frames):")
-    for i, frame in enumerate(relevant_frames[-5:]):
-        filename = os.path.basename(frame.filename)
-        log_progress(f"  {i+1}. {filename}:{frame.lineno} in {frame.name}")
-    
-    if not task_function:
-        log_progress("❌ No task_function provided - this is the failure point!")
-        return "❌ Task function required. Must call: handle_music_request(request, task_function=Task) where Task supports task_function(description='...', prompt='...', subagent_type='general-purpose')"
-    
-    log_progress(f"✅ Task function available: {type(task_function)}")
-    
-    try:
-        # Step 1: Create agent first for consistent Task function access
-        log_progress("Creating music agent with Task function...")
-        agent = ClaudeCodeMusicAgent(task_function=task_function)
+        log_progress(f"🎯 [API] Processing music request: '{user_request}' (PID: {pid})")
         
-        # Step 2: Parse the natural language request using agent's LLM method
-        log_progress("Parsing request with LLM...")
+        # Step 1: Create agent with API client
+        log_progress("Creating music agent with API client...")
+        agent = ClaudeCodeMusicAgent(api_client=api_client)
+        
+        # Step 2: Parse the natural language request using API
+        log_progress("Parsing request with API...")
         parsed = agent.parse_music_request(user_request)
         
         # Handle parsing errors
@@ -946,12 +749,28 @@ def handle_music_request(user_request: str, task_function=None, verbose: bool = 
         
         # Convert agent result to user-friendly message
         if result['success']:
-            return result['message']
+            if verbose:
+                details = result.get('details', {})
+                message = result['message']
+                if 'search_query_used' in details:
+                    message += f"\n(Used search query: '{details['search_query_used']}')"
+                if 'total_results' in details:
+                    message += f"\n(Found {details['total_results']} total results)"
+                return message
+            else:
+                return result['message']
         else:
-            return f"❌ {result['message']}"
+            if verbose:
+                error_details = result.get('details', {})
+                message = result['message']
+                if 'queries_tried' in error_details:
+                    message += f"\n(Tried {len(error_details['queries_tried'])} different search queries)"
+                return f"❌ {message}"
+            else:
+                return f"❌ {result['message']}"
         
     except Exception as e:
-        elapsed = (datetime.now() - start_time).total_seconds()
+        elapsed = (datetime.now() - start_time).total_seconds() if 'start_time' in locals() else 0
         log_progress(f"Failed after {elapsed:.2f} seconds: {str(e)}")
         return f"❌ Unexpected error processing music request: {str(e)}"
 
