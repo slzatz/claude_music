@@ -617,7 +617,7 @@ class MusicAgent:
     # Search Query Generation Methods
     # ============================================================================
     
-    def _generate_smart_search_queries(self, title: str, artist: str = None, preferences: Dict[str, Any] = None) -> List[str]:
+    def generate_search_queries(self, title: str, artist: str = None, preferences: Dict[str, Any] = None) -> List[str]:
         """
         Generate intelligent search queries with fallback strategies for API issues.
         
@@ -632,7 +632,7 @@ class MusicAgent:
         Returns:
             Ordered list of search query strings to try
         """
-        log_progress("_generate_smart_search_queries")
+        log_progress("generate_search_queries")
         preferences = preferences or {}
         queries = []
         
@@ -770,7 +770,7 @@ Album:"""
             
             # Step 1: Generate intelligent search queries with fallback strategies
             log_progress("Generating search queries...")
-            search_queries = self._generate_smart_search_queries(title, artist, preferences)
+            search_queries = self.generate_search_queries(title, artist, preferences)
             
             # Step 2: Execute searches with enhanced error handling
             best_match = None
@@ -782,7 +782,10 @@ Album:"""
                 log_progress(f"Trying search: '{query}'")
                 try:
                     search_result = self.execute_sonos_command(['sonos', 'searchtrack'] + query.split())
-                    log_progress(f"sonos searchtrack command returned: {search_result}")
+                    if search_result['success']:
+                        log_progress(f"sonos searchtrack command was successful")
+                    else:   
+                        log_progress(f"sonos searchtrack command failed: {search_result.get('error', 'Unknown error')}")
                     
                     # Check for API parsing failure in error message (since exceptions are caught by execute_sonos_command)
                     if not search_result['success'] and search_result.get('error') and "string indices must be integers" in search_result['error']:
@@ -912,199 +915,6 @@ Album:"""
                 'details': {'error': str(e)}
             }
     
-    #def parse_music_request(self, request: str) -> Dict[str, Any]:
-    #    """
-    #    Parse a natural language music request using Claude API.
-    #    
-    #    This method now uses direct API calls for reliable, consistent parsing
-    #    without the mock response issues of the Task function approach.
-    #    
-    #    Args:
-    #        request: Natural language music request (e.g., "play Bruce Springsteen's Thunder Road")
-    #        
-    #    Returns:
-    #        Dict with parsed components: {'title': str, 'artist': str|None, 'preferences': dict}
-    #    """
-    #    if not self.api_client:
-    #        log_progress("❌ No API client available - falling back to simple parsing")
-    #        return _fallback_simple_parse(request)
-    #    
-    #    log_progress(f"🎯 Parsing with API: '{request[:50]}...'")
-    #    
-    #    try:
-    #        # Use the API client for reliable parsing
-    #        result = self.api_client.parse_music_request(request)
-    #        
-    #        # Check for API errors
-    #        if 'error' in result:
-    #            log_progress(f"❌ API parsing error: {result['error']}")
-    #            log_progress("🔄 Falling back to simple regex parsing")
-    #            return _fallback_simple_parse(request)
-    #        
-    #        log_progress("✅ API parsing completed successfully")
-    #        return result
-    #        
-    #    except Exception as e:
-    #        log_progress(f"❌ Unexpected error in API parsing: {str(e)}")
-    #        log_progress("🔄 Falling back to simple regex parsing")
-    #        return _fallback_simple_parse(request)
-    
-    #def handle_parsed_music_request__(self, title: str, artist: str = None, preferences: Dict[str, Any] = None) -> Dict[str, Any]:
-    #    """
-    #    Enhanced version that uses LLM album lookup when API parsing fails.
-    #    
-    #    This overrides the base class method to add intelligent album-based fallback
-    #    when the standard search queries cause API parsing exceptions.
-    #    """
-    #    try:
-    #        preferences = preferences or {}
-    #        
-    #        # Step 1: Generate intelligent search queries with fallback strategies
-    #        log_progress("Generating search queries...")
-    #        search_queries = self._generate_smart_search_queries(title, artist, preferences)
-    #        
-    #        # Step 2: Execute searches with enhanced error handling
-    #        best_match = None
-    #        search_results = None
-    #        successful_query = None
-    #        api_parsing_failed = False
-    #        
-    #        for query in search_queries:
-    #            log_progress(f"Trying search: '{query}'")
-    #            try:
-    #                search_result = self.execute_sonos_command(['sonos', 'searchtrack'] + query.split())
-    #                
-    #                # Check for API parsing failure in error message (since exceptions are caught by execute_sonos_command)
-    #                if not search_result['success'] and search_result.get('error') and "string indices must be integers" in search_result['error']:
-    #                    log_progress(f"🚫 API parsing failed for query '{query}': {search_result['error']}")
-    #                    api_parsing_failed = True
-    #                    
-    #                    # Immediately try album lookup instead of continuing with broad searches
-    #                    if self.task_function:
-    #                        log_progress("🔍 API parsing failed, immediately trying LLM album lookup...")
-    #                        album_name = self._get_album_for_song(title, artist)
-    #                        
-    #                        if album_name:
-    #                            # Include artist in album search for better precision
-    #                            if artist:
-    #                                album_search_query = f"{artist} {album_name}"
-    #                                log_progress(f"🎵 Trying artist+album search: '{album_search_query}'")
-    #                                album_search_result = self.execute_sonos_command(['sonos', 'searchtrack', artist, album_name])
-    #                            else:
-    #                                log_progress(f"🎵 Trying album-only search: '{album_name}'")
-    #                                album_search_result = self.execute_sonos_command(['sonos', 'searchtrack', album_name])
-    #                            
-    #                            if album_search_result['success'] and album_search_result['output'].strip():
-    #                                results = self.parse_search_results(album_search_result['output'])
-    #                                
-    #                                if results:
-    #                                    log_progress(f"Found {len(results)} results from album search")
-    #                                    # For album search results, use simple programmatic matching (no LLM needed)
-    #                                    # since we have a focused set of tracks from the specific album
-    #                                    match_position = super()._intelligent_match_selection(
-    #                                        results, title, artist, preferences
-    #                                    )
-    #                                    
-    #                                    if match_position:
-    #                                        log_progress(f"✅ Album-based search successful! Selected position {match_position}")
-    #                                        best_match = match_position
-    #                                        search_results = results
-    #                                        # Update successful query to show it used artist+album
-    #                                        if artist:
-    #                                            successful_query = f"album:{artist} {album_name}"
-    #                                        else:
-    #                                            successful_query = f"album:{album_name}"
-    #                                        break  # Exit the search loop - we found our match
-    #                                    else:
-    #                                        log_progress("No good match found in album search results")
-    #                                else:
-    #                                    log_progress("Album search returned no valid results")
-    #                            else:
-    #                                log_progress("Album search command failed")
-    #                        else:
-    #                            log_progress("❌ Could not determine album for immediate lookup")
-    #                    
-    #                    # Only continue with remaining queries if album lookup failed
-    #                    continue
-    #                
-    #                if search_result['success'] and search_result['output'].strip():
-    #                    results = self.parse_search_results(search_result['output'])
-    #                    
-    #                    if results:
-    #                        log_progress(f"Found {len(results)} results")
-    #                        # Step 3: Analyze results and find best match
-    #                        match_position = self._intelligent_match_selection(
-    #                            results, title, artist, preferences
-    #                        )
-    #                        
-    #                        if match_position:
-    #                            log_progress(f"Selected position {match_position}")
-    #                            best_match = match_position
-    #                            search_results = results
-    #                            successful_query = query
-    #                            break
-    #                    else:
-    #                        log_progress("No valid results found")
-    #                else:
-    #                    log_progress("Search command failed or returned no results")
-    #            
-    #            except Exception as e:
-    #                # Log unexpected errors but continue trying
-    #                log_progress(f"⚠️ Unexpected error for query '{query}': {str(e)}")
-    #                continue
-    #        
-    #        if not best_match:
-    #            return {
-    #                'success': False,
-    #                'message': f'Could not find a good match for "{title}" by {artist or "unknown artist"}. Try being more specific or using different search terms.',
-    #                'details': {
-    #                    'parsed_title': title,
-    #                    'parsed_artist': artist,
-    #                    'queries_tried': search_queries,
-    #                    'api_parsing_failed': api_parsing_failed
-    #                }
-    #            }
-    #        
-    #        # Step 3: Play the selected track
-    #        selected_track = next(
-    #            (r for r in search_results if r['position'] == best_match), 
-    #            None
-    #        )
-    #        
-    #        log_progress(f"Playing track: {selected_track['title']} by {selected_track['artist']}")
-    #        play_result = self.play_track_by_position(best_match)
-    #        
-    #        if play_result['success']:
-    #            return {
-    #                'success': True,
-    #                'message': f'Now playing: {selected_track["title"]} by {selected_track["artist"]}',
-    #                'details': {
-    #                    'track': selected_track,
-    #                    'search_query_used': successful_query,
-    #                    'position_played': best_match,
-    #                    'total_results': len(search_results),
-    #                    'used_album_lookup': 'album:' in successful_query if successful_query else False
-    #                }
-    #            }
-    #        else:
-    #            return {
-    #                'success': False,
-    #                'message': f'Found the track but failed to play it: {play_result.get("error", "Unknown error")}',
-    #                'details': {
-    #                    'found_track': selected_track,
-    #                    'play_error': play_result.get('error')
-    #                }
-    #            }
-    #            
-    #    except Exception as e:
-    #        return {
-    #            'success': False,
-    #            'message': f'Unexpected error processing music request: {str(e)}',
-    #            'details': {'error': str(e)}
-    #        }
-
-
-
 def get_current_track() -> str:
     """Get information about the currently playing track."""
     agent = MusicAgent()
