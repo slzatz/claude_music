@@ -88,40 +88,10 @@ class ClaudeAPIClient:
         self.client = anthropic.Anthropic(api_key=self.api_key)
         log_progress("🔌 API client initialized successfully")
     
-    def test_connection(self) -> Dict[str, Any]:
-        """
-        Test the API connection with a simple request.
-        
-        Returns:
-            Dict with success status and details
-        """
-        try:
-            log_progress("🧪 Testing API connection...")
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=10,
-                messages=[{"role": "user", "content": "Hello"}]
-            )
-            log_progress("✅ API connection test successful")
-            return {
-                'success': True,
-                'message': 'API connection successful',
-                'model': self.model,
-                'response_length': len(response.content[0].text)
-            }
-        except Exception as e:
-            log_progress(f"❌ API connection test failed: {str(e)}")
-            return {
-                'success': False,
-                'error': str(e),
-                'message': 'API connection failed'
-            }
     
     def parse_music_request(self, request: str) -> Dict[str, Any]:
         """
         Parse a natural language music request using Claude API.
-        
-        This replaces the unreliable Task function calls with direct API access.
         
         Args:
             request: Natural language music request
@@ -163,8 +133,11 @@ Remember: Return ONLY the JSON object, nothing else."""
                     raise ValueError("Response is not a JSON object")
                 
                 # Ensure required keys exist
-                required_keys = ['title', 'artist', 'preferences']
-                for key in required_keys:
+                if 'title' not in parsed_result:
+                    raise ValueError("Missing 'title' in response")
+
+                other_keys = ['artist', 'preferences']
+                for key in other_keys:
                     if key not in parsed_result:
                         parsed_result[key] = None if key == 'artist' else {}
                 
@@ -222,7 +195,7 @@ Remember: Return ONLY the JSON object, nothing else."""
                 )
             except (NameError, ImportError):
                 # Fallback prompt if template not available
-                prompt = self._create_selection_prompt(results, target_title, target_artist, preferences)
+                prompt = self.create_selection_prompt(results, target_title, target_artist, preferences)
             
             if not prompt:
                 log_progress("❌ Could not create selection prompt")
@@ -277,7 +250,7 @@ IMPORTANT: Return ONLY the position number (integer), no explanation or other te
         """
         log_progress("🔄 Attempting fallback parsing...")
         
-        # Try to extract JSON from the response text
+        # Try to extract JSON from the API response text
         import re
         
         # Look for JSON-like structures in the response
@@ -288,7 +261,7 @@ IMPORTANT: Return ONLY the position number (integer), no explanation or other te
             except json.JSONDecodeError:
                 pass
         
-        # Simple regex fallback
+        # Regex fallback if API response is unusable
         request_lower = request.lower().strip()
         
         # Remove common prefixes
@@ -327,7 +300,7 @@ IMPORTANT: Return ONLY the position number (integer), no explanation or other te
             'preferences': preferences
         }
     
-    def _create_selection_prompt(self, results: List[Dict], title: str, 
+    def create_selection_prompt(self, results: List[Dict], title: str, 
                                artist: str = None, preferences: Dict = None) -> str:
         """
         Create a fallback selection prompt if the template is not available.
@@ -373,7 +346,36 @@ Prefer: exact title matches, correct artist, original albums over compilations.
 
 Return only the position number."""
 
+    def test_connection(self) -> Dict[str, Any]:
+        """
+        Test the API connection with a simple request.
+        
+        Returns:
+            Dict with success status and details
+        """
+        try:
+            log_progress("🧪 Testing API connection...")
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=10,
+                messages=[{"role": "user", "content": "Hello"}]
+            )
+            log_progress("✅ API connection test successful")
+            return {
+                'success': True,
+                'message': 'API connection successful',
+                'model': self.model,
+                'response_length': len(response.content[0].text)
+            }
+        except Exception as e:
+            log_progress(f"❌ API connection test failed: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e),
+                'message': 'API connection failed'
+            }
 
+# Convenience function to get an api client - not currently in use
 def get_api_client() -> ClaudeAPIClient:
     """
     Get a configured Claude API client.
@@ -388,51 +390,7 @@ def get_api_client() -> ClaudeAPIClient:
     """
     return ClaudeAPIClient()
 
-
 # Convenience functions that match the existing interface
-def parse_music_request_api(request: str, api_client: Optional[ClaudeAPIClient] = None) -> Dict[str, Any]:
-    """
-    Parse music request using Claude API.
-    
-    This is a drop-in replacement for the Task function-based parsing.
-    
-    Args:
-        request: Natural language music request
-        api_client: Optional pre-configured API client
-        
-    Returns:
-        Parsed music request dict
-    """
-    if api_client is None:
-        api_client = get_api_client()
-    
-    return api_client.parse_music_request(request)
-
-
-def select_best_track_api(results: List[Dict], target_title: str, 
-                         target_artist: str = None, preferences: Dict = None,
-                         api_client: Optional[ClaudeAPIClient] = None) -> Optional[int]:
-    """
-    Select best track using Claude API.
-    
-    This is a drop-in replacement for the Task function-based selection.
-    
-    Args:
-        results: Search results list
-        target_title: Target song title
-        target_artist: Target artist name
-        preferences: User preferences dict
-        api_client: Optional pre-configured API client
-        
-    Returns:
-        Position number of best match
-    """
-    if api_client is None:
-        api_client = get_api_client()
-    
-    return api_client.select_best_track(results, target_title, target_artist, preferences)
-
-
 if __name__ == "__main__":
     # Test the API client
     try:

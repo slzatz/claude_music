@@ -20,7 +20,7 @@ from datetime import datetime
 def log_progress(message: str):
     """Log progress to file for headless mode monitoring."""
     timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]  # HH:MM:SS.mmm format
-    log_message = f"[{timestamp}] 🎵 {message}"
+    log_message = f"[{timestamp}] 🎵 Agent {message}"
     
     # Write to log file for headless mode monitoring
     try:
@@ -49,13 +49,16 @@ def handle_music_request(user_request: str, api_client=None, verbose: bool = Fal
     Example:
         result = handle_music_request("play Bruce Springsteen's Thunder Road")
     """
+
+    log_progress("handle_music_request")
+
     try:
         start_time = datetime.now()
         
         # Show process info for debugging
         import os
         pid = os.getpid()
-        log_progress(f"🎯 [API] Processing music request: '{user_request}' (PID: {pid})")
+        log_progress(f"🎯 Processing music request: '{user_request}' (PID: {pid})")
         
         # Step 1: Create agent with API client
         log_progress("Step 1: Create agent with API client")
@@ -181,8 +184,10 @@ class MusicAgent:
         # Initialize API client for LLM capabilities
         if api_client is None:
             try:
-                from claude_api_client import get_api_client
-                api_client = get_api_client()
+                #from claude_api_client import get_api_client
+                from claude_api_client import ClaudeAPIClient
+                #api_client = get_api_client()
+                api_client = ClaudeAPIClient()  
             except Exception as e:
                 log_progress(f"❌ Could not initialize API client: {e}")
                 api_client = None
@@ -315,6 +320,7 @@ class MusicAgent:
             log_progress("❌ No API client available - falling back to simple parsing")
             return _fallback_simple_parse(request)
         
+        log_progress("parse_music_request")
         log_progress(f"🎯 Parsing with API: '{request[:50]}...'")
         
         try:
@@ -327,7 +333,7 @@ class MusicAgent:
                 log_progress("🔄 Falling back to simple regex parsing")
                 return _fallback_simple_parse(request)
             
-            log_progress("✅ API parsing completed successfully")
+            log_progress("✅ API request parsing completed successfully")
             return result
             
         except Exception as e:
@@ -653,23 +659,24 @@ class MusicAgent:
             if artist:
                 # Primary search strategies
                 queries.extend([
-                    f"{title_var} by {artist}",
                     f"{title_var} {artist}",
                     f"{artist} {title_var}"
+                    #f"{title_var} by {artist}",
                 ])
                 
                 # Handle version preferences
                 if preferences.get('prefer_live'):
-                    queries.insert(0, f"live {title_var} {artist}")
-                    queries.insert(1, f"{title_var} live {artist}")
-                    queries.insert(2, f"{artist} {title_var} live")
+                    #queries.insert(0, f"live {title_var} {artist}")
+                    queries.insert(0, f"{title_var} live {artist}")
+                    queries.insert(1, f"{artist} {title_var} live")
                 elif preferences.get('prefer_acoustic'):
-                    queries.insert(0, f"acoustic {title_var} {artist}")
-                    queries.insert(1, f"{title_var} acoustic {artist}")
-                    queries.insert(2, f"{artist} {title_var} acoustic")
+                    #queries.insert(0, f"acoustic {title_var} {artist}")
+                    queries.insert(0, f"{title_var} acoustic {artist}")
+                    queries.insert(1, f"{artist} {title_var} acoustic")
                 elif preferences.get('prefer_studio'):
-                    queries.insert(0, f"studio {title_var} {artist}")
-                    queries.insert(1, f"{title_var} studio {artist}")
+                    queries.insert(0, f"{title_var} {artist} studio")
+                    #queries.insert(1, f"{title_var} studio {artist}")
+                    #queries.insert(1, f"{title_var} studio {artist}")
                 
                 # Fallback: just artist name (to find any songs by them)
                 queries.append(artist)
@@ -679,13 +686,13 @@ class MusicAgent:
                 queries.append(title_var)
                 
                 if preferences.get('prefer_live'):
-                    queries.insert(0, f"live {title_var}")
-                    queries.insert(1, f"{title_var} live")
+                    #queries.insert(0, f"live {title_var}")
+                    queries.insert(0, f"{title_var} live")
                 elif preferences.get('prefer_acoustic'):
-                    queries.insert(0, f"acoustic {title_var}")
-                    queries.insert(1, f"{title_var} acoustic")
+                    #queries.insert(0, f"acoustic {title_var}")
+                    queries.insert(0, f"{title_var} acoustic")
                 elif preferences.get('prefer_studio'):
-                    queries.insert(0, f"studio {title_var}")
+                    queries.insert(0, f"{title_var} studio")
         
         return queries
 
@@ -771,6 +778,7 @@ Album:"""
             # Step 1: Generate intelligent search queries with fallback strategies
             log_progress("Generating search queries...")
             search_queries = self.generate_search_queries(title, artist, preferences)
+            log_progress(f"Generated {len(search_queries)} search queries: {search_queries}")
             
             # Step 2: Execute searches with enhanced error handling
             best_match = None
