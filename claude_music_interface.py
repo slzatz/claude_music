@@ -1,9 +1,16 @@
 """
-Simple interface for Claude Code to handle music requests using the intelligent agent.
+MusicAgent class interacts with Sonos CLI and Claude API to handle music requests.`
 
-This module provides a clean, easy-to-use interface that Claude Code can invoke
-to handle natural language music requests without needing to understand the
-internal workings of the agent.
+The application is designed to process natural language requests to play music, which includes
+parsing the requests, searching for tracks, selecting the best match, and playing the track on a Sonos system.
+
+The MusicAgent method execute_sonos_command executes Sonos CLI commands and returns structured results.
+For example, execute_sonos_command(['sonos', 'searchtrack', 'harvest', 'neil', 'young']) returns a dictionary with keys:
+- 'success': bool indicating if the command was successful
+- 'output': str containing the command output
+- 'error': str containing error message if any
+
+Currently, "sonos searchtrack" and sonos "playtrackfromlist" are the sonos commands used.
 """
 
 # Unified MusicAgent class - contains all functionality previously split between base and derived classes
@@ -293,7 +300,8 @@ class MusicAgent:
         """Get information about currently playing track."""
         result = self.execute_sonos_command(['sonos', 'what'])
         return result
-    
+  # not really necessary since can just do self.execute_sonos_command(['sonos', 'playtrackfromlist', str(position)])  
+  # without creating a separate method just like we're doing with searchtrack
     def play_track_by_position(self, position: int) -> Dict[str, Any]:
         """Play a track by its position from the last search results."""
         result = self.execute_sonos_command(['sonos', 'playtrackfromlist', str(position)])
@@ -923,30 +931,30 @@ Album:"""
                 'details': {'error': str(e)}
             }
     
-def get_current_track() -> str:
-    """Get information about the currently playing track."""
-    agent = MusicAgent()
-    result = agent.get_current_track_info()
-    
-    if result['success']:
-        return result['output']
-    else:
-        return f"❌ Could not get current track info: {result.get('error', 'Unknown error')}"
-
-
-# Convenience functions for common operations
-def pause_music() -> str:
-    """Pause music playback."""
-    agent = MusicAgent()
-    result = agent.execute_sonos_command(['sonos', 'pause'])
-    return "⏸️ Paused" if result['success'] else f"❌ Failed to pause: {result.get('error')}"
-
-
-def resume_music() -> str:
-    """Resume music playback."""
-    agent = MusicAgent()
-    result = agent.execute_sonos_command(['sonos', 'resume'])
-    return "▶️ Resumed" if result['success'] else f"❌ Failed to resume: {result.get('error')}"
+#def get_current_track() -> str:
+#    """Get information about the currently playing track."""
+#    agent = MusicAgent()
+#    result = agent.get_current_track_info()
+#    
+#    if result['success']:
+#        return result['output']
+#    else:
+#        return f"❌ Could not get current track info: {result.get('error', 'Unknown error')}"
+#
+#
+## Convenience functions for common operations
+#def pause_music() -> str:
+#    """Pause music playback."""
+#    agent = MusicAgent()
+#    result = agent.execute_sonos_command(['sonos', 'pause'])
+#    return "⏸️ Paused" if result['success'] else f"❌ Failed to pause: {result.get('error')}"
+#
+#
+#def resume_music() -> str:
+#    """Resume music playback."""
+#    agent = MusicAgent()
+#    result = agent.execute_sonos_command(['sonos', 'resume'])
+#    return "▶️ Resumed" if result['success'] else f"❌ Failed to resume: {result.get('error')}"
 
 
 # Example usage demonstrations
