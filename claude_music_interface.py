@@ -10,7 +10,7 @@ For example, execute_sonos_command(['sonos', 'searchtrack', 'harvest', 'neil', '
 - 'output': str containing the command output
 - 'error': str containing error message if any
 
-Currently, "sonos searchtrack" and sonos "playtrackfromlist" are the sonos commands used.
+Currently, "sonos searchtrack" and sonos "select" are the sonos commands used.
 """
 
 # Unified MusicAgent class - contains all functionality previously split between base and derived classes
@@ -80,13 +80,18 @@ def handle_music_request(user_request: str, api_client=None, verbose: bool = Fal
             log_progress(f"Parsing failed: {parsed['error']}")
             return f"❌ Could not understand request: {parsed['error']}"
         
-        log_progress(f"Parsed: title='{parsed['title']}', artist='{parsed.get('artist', 'none')}'")
+        #log_progress(f"Parsed: title='{parsed['title']}', artist='{parsed.get('artist', 'none')}'")
+        log_progress(f"Parsed: title='{parsed['title']}', artist='{parsed['artist']}', album='{parsed['album']}'")
+        if not parsed['title']:
+            log_progress("No title parsed from request - presumed to be album search")
+            agent.album_search = True
         
         # Step 3: Generate queries, search, match and play 
         log_progress("Step 3: Generate queries, search, match and play")
         result = agent.search_match_play(
             parsed['title'], 
             parsed['artist'], 
+            parsed['album'], 
             parsed['preferences']
         )
         
@@ -186,7 +191,8 @@ class MusicAgent:
                        If None, will attempt to create one, falling back to programmatic-only mode.
         """
         # Initialize core state
-        self.last_search_results = []
+        #self.last_search_results = []
+        self.album_search = False  # Whether the current request is an album search
         
         # Initialize API client for LLM capabilities
         if api_client is None:
@@ -304,7 +310,8 @@ class MusicAgent:
   # without creating a separate method just like we're doing with searchtrack
     def play_track_by_position(self, position: int) -> Dict[str, Any]:
         """Play a track by its position from the last search results."""
-        result = self.execute_sonos_command(['sonos', 'playtrackfromlist', str(position)])
+        #result = self.execute_sonos_command(['sonos', 'playtrackfromlist', str(position)])
+        result = self.execute_sonos_command(['sonos', 'select', str(position)])
         return result
 
     # ============================================================================
@@ -353,8 +360,8 @@ class MusicAgent:
     # LLM-Powered Selection Method (when API available)
     # ============================================================================
     
-    def llm_select_best_match(self, results, target_title: str, 
-                              target_artist: str = None, preferences = None):
+    def llm_select_best_match_track(self, results, target_title: str, 
+                              target_artist: str = None, target_album: str = None, preferences = None):
         """
         Use Claude API for reliable LLM-powered result selection.
         
@@ -372,6 +379,40 @@ class MusicAgent:
             position = self.api_client.select_best_track(
                 results=results,
                 target_title=target_title, 
+                target_artist=target_artist,
+                preferences=preferences or {}
+            )
+            
+            if position:
+                log_progress(f"✅ API selected position: {position}")
+                return position
+            else:
+                log_progress("❌ API selection returned no result")
+                return None
+                
+        except Exception as e:
+            log_progress(f"❌ API selection error: {str(e)}")
+            return None
+
+    def llm_select_best_match_album(self, results, target_title: str, 
+                              target_artist: str = None, target_album: str = None, preferences = None):
+        """
+        Use Claude API for reliable LLM-powered result selection.
+        
+        This method now uses direct API calls for consistent selection behavior
+        without the mock response issues of the Task function approach.
+        """
+        if not self.api_client:
+            log_progress("❌ No API client available for LLM selection")
+            return None
+            
+        log_progress(f"🎯 Using API for album selection from {len(results)} results")
+        
+        try:
+            # Use the API client for reliable selection
+            position = self.api_client.select_best_album(
+                results=results,
+                target_album=target_album,
                 target_artist=target_artist,
                 preferences=preferences or {}
             )
@@ -441,7 +482,7 @@ class MusicAgent:
         text_to_check = f"{title} {album}".lower()
         return any(re.search(pattern, text_to_check) for pattern in acoustic_patterns)
 
-    def _calculate_match_score(self, result: Dict[str, Any], target_title: str, 
+    def _calculate_match_score_track(self, result: Dict[str, Any], target_title: str, 
                              target_artist: str, prefer_live: bool, prefer_acoustic: bool, prefer_studio: bool) -> float:
         """
         Calculate a comprehensive match score for a search result.
@@ -517,28 +558,116 @@ class MusicAgent:
         
         return max(0.0, min(1.0, combined_score))
 
+    def _calculate_match_score_album(self, result: Dict[str, Any], target_album: str, 
+                             target_artist: str, prefer_live: bool, prefer_acoustic: bool, prefer_studio: bool) -> float:
+        """
+        Calculate a comprehensive match score for a search result.
+        
+        Considers multiple factors:
+        - Title similarity (exact vs fuzzy matching)
+        - Artist similarity (if provided)  
+        - Live/acoustic/studio preference matching
+        - Album context for version detection
+        - Quality indicators (explicit, remaster, etc.)
+        """
+        artist_clean = self._clean_for_matching(result['artist'])
+        album_clean = self._clean_for_matching(result['album'])
+        
+        # Base title similarity score
+        if album_clean == target_album:
+            album_score = 1.0  # Exact match
+        else:
+            album_score = self._calculate_similarity(album_clean, target_album)
+            
+            # Special handling for exact matches with different spacing/punctuation
+            if self._normalize_for_exact_match(album_clean) == self._normalize_for_exact_match(target_album):
+                album_score = 1.0
+        
+        # Artist matching score
+        artist_score = 0.0
+        if target_artist:
+            if artist_clean == target_artist:
+                artist_score = 1.0
+            else:
+                artist_score = self._calculate_similarity(artist_clean, target_artist)
+                # Bonus for partial name matches
+                if target_artist in artist_clean or artist_clean in target_artist:
+                    artist_score = max(artist_score, 0.8)
+        
+        # Version type detection and scoring
+        is_live_track = self._detect_live_version(result['title'], result['album'])
+        is_acoustic_track = self._detect_acoustic_version(result['title'], result['album'])
+        is_studio_track = not is_live_track and not is_acoustic_track  # Studio is default
+        
+        version_score = 0.0
+        
+        if prefer_live:
+            if is_live_track:
+                version_score = 0.3  # Significant bonus for live versions when requested
+            else:
+                version_score = -0.1  # Small penalty when live requested but not found
+        elif prefer_acoustic:
+            if is_acoustic_track:
+                version_score = 0.3  # Significant bonus for acoustic versions when requested
+            else:
+                version_score = -0.1  # Small penalty when acoustic requested but not found
+        elif prefer_studio:
+            if is_studio_track:
+                version_score = 0.2  # Bonus for studio when specifically requested
+            else:
+                version_score = -0.1  # Penalty when studio requested but not found
+        else:
+            # Default preference: slightly prefer studio versions
+            if is_studio_track:
+                version_score = 0.1  # Small bonus for studio
+            elif is_live_track:
+                version_score = -0.05  # Very small penalty for live when not requested
+            else:  # acoustic
+                version_score = 0.05  # Neutral for acoustic
+        
+        # Combine scores
+        if target_artist:
+            combined_score = (album_score * 0.6) + (artist_score * 0.3) + version_score + 0.1
+        else:
+            combined_score = (album_score * 0.8) + version_score + 0.2
+        
+        return max(0.0, min(1.0, combined_score))
+
     def _get_programmatic_scores(self, results: List[Dict[str, Any]], target_title: str, 
-                               target_artist: str, preferences: Dict[str, Any]) -> List[Tuple[int, float, Dict]]:
+                                 target_artist: str, target_album: str, preferences: Dict[str, Any]) -> List[Tuple[int, float, Dict]]:
         """Get programmatic scores for all results."""
         prefer_live = preferences.get('prefer_live', False)
         prefer_acoustic = preferences.get('prefer_acoustic', False)
         prefer_studio = preferences.get('prefer_studio', False)
         
         scored_matches = []
-        target_title_clean = self._clean_for_matching(target_title)
-        target_artist_clean = self._clean_for_matching(target_artist) if target_artist else None
-        
-        for result in results:
-            score = self._calculate_match_score(
-                result, target_title_clean, target_artist_clean, prefer_live, prefer_acoustic, prefer_studio
-            )
+        if not self.album_search:
+            target_title_clean = self._clean_for_matching(target_title)
+            target_artist_clean = self._clean_for_matching(target_artist) if target_artist else None
             
-            if score > 0.3:  # Minimum viable match threshold
-                scored_matches.append((result['position'], score, result))
-        
+            for result in results:
+                score = self._calculate_match_score_track(
+                    result, target_title_clean, target_artist_clean, prefer_live, prefer_acoustic, prefer_studio
+                )
+                
+                if score > 0.3:  # Minimum viable match threshold
+                    scored_matches.append((result['position'], score, result))
+        else:
+            # Album search mode - match by album name
+            target_album_clean = self._clean_for_matching(target_album)
+            target_artist_clean = self._clean_for_matching(target_artist) if target_artist else None
+            
+            for result in results:
+                score = self._calculate_match_score_album(
+                    result, target_album_clean, target_artist_clean, prefer_live, prefer_acoustic, prefer_studio
+                )
+                
+                if score > 0.3:  # Minimum viable match threshold
+                    scored_matches.append((result['position'], score, result))
+
         return scored_matches
     
-    def select_best_match(self, results, target_title: str, target_artist: str = None, preferences = None):
+    def select_best_match(self, results, target_title: str, target_artist: str = None, target_album: str = None, preferences = None):
         """
         Hybrid intelligent selection using both LLM and programmatic approaches.
         
@@ -554,7 +683,7 @@ class MusicAgent:
         preferences = preferences or {}
         
         # First, get programmatic scores for all results
-        programmatic_matches = self._get_programmatic_scores(results, target_title, target_artist, preferences)
+        programmatic_matches = self._get_programmatic_scores(results, target_title, target_artist, target_album, preferences)
         
         if not programmatic_matches:
             return None
@@ -563,7 +692,10 @@ class MusicAgent:
         if self.api_client: #and self._should_use_llm_selection(programmatic_matches, preferences):
             try:
                 log_progress("Using LLM to select best match...")
-                llm_selection = self.llm_select_best_match(results, target_title, target_artist, preferences)
+                if self.album_search:
+                    llm_selection = self.llm_select_best_match_album(results, target_album, target_artist, preferences)
+                else:
+                    llm_selection = self.llm_select_best_match_track(results, target_title, target_artist, target_album, preferences)
                 if llm_selection:
                     log_progress("LLM selection completed")
                     return llm_selection
@@ -631,7 +763,7 @@ class MusicAgent:
     # Search Query Generation Methods
     # ============================================================================
     
-    def generate_search_queries(self, title: str, artist: str = None, preferences: Dict[str, Any] = None) -> List[str]:
+    def generate_search_queries(self, title: str, artist: str = None, album: str = None, preferences: Dict[str, Any] = None) -> List[str]:
         """
         Generate intelligent search queries with fallback strategies for API issues.
         
@@ -650,12 +782,16 @@ class MusicAgent:
         preferences = preferences or {}
         queries = []
         
+        if self.album_search: #not title:
+            queries.append(f"{artist if artist else ''} {album if album else ''}")
+            return queries
+
         # Strategy for handling known API issues
         # "fixing her hair" fails, but "fixing hair" works
         title_variants = [title]
         
         # Create abbreviated versions that might avoid API issues
-        if len(title.split()) > 2:
+        if title  > 2:
             # Try removing small words that might cause parsing issues
             title_no_articles = re.sub(r'\b(the|a|an|her|his|my|your|our|their)\b', '', title, flags=re.IGNORECASE)
             title_no_articles = re.sub(r'\s+', ' ', title_no_articles).strip()
@@ -764,7 +900,7 @@ Album:"""
     # Main Workflow Method
     # ============================================================================
     
-    def search_match_play(self, title: str, artist: str = None, preferences: Dict[str, Any] = None) -> Dict[str, Any]:
+    def search_match_play(self, title: str = None, artist: str = None, album: str = None, preferences: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         Process a music request with pre-parsed components.
         
@@ -785,7 +921,7 @@ Album:"""
             
             # Step 1: Generate intelligent search queries with fallback strategies
             log_progress("Generating search queries...")
-            search_queries = self.generate_search_queries(title, artist, preferences)
+            search_queries = self.generate_search_queries(title, artist, album, preferences)
             log_progress(f"Generated {len(search_queries)} search queries: {search_queries}")
             
             # Step 2: Execute searches with enhanced error handling
@@ -797,11 +933,16 @@ Album:"""
             for query in search_queries:
                 log_progress(f"Trying search: '{query}'")
                 try:
-                    search_result = self.execute_sonos_command(['sonos', 'searchtrack'] + query.split())
+                    if self.album_search:
+                        log_progress("Album search mode - using sonos searchalbum query")
+                        search_result = self.execute_sonos_command(['sonos', 'searchalbum'] + query.split())
+                    else:
+                        log_progress("Track search mode - using sonos searchtrack  query")
+                        search_result = self.execute_sonos_command(['sonos', 'searchtrack'] + query.split())
                     if search_result['success']:
-                        log_progress(f"sonos searchtrack command was successful")
+                        log_progress(f"sonos search[track/album] command was successful")
                     else:   
-                        log_progress(f"sonos searchtrack command failed: {search_result.get('error', 'Unknown error')}")
+                        log_progress(f"sonos search[track/album] command failed: {search_result.get('error', 'Unknown error')}")
                     
                     # Check for API parsing failure in error message (since exceptions are caught by execute_sonos_command)
                     if not search_result['success'] and search_result.get('error') and "string indices must be integers" in search_result['error']:
@@ -830,7 +971,7 @@ Album:"""
                                         log_progress(f"Found {len(results)} results from album search")
                                         # For album search results, use programmatic matching for focused results
                                         match_position = self.select_best_match(
-                                            results, title, artist, preferences
+                                            results, title, artist, album, preferences
                                         )
                                         
                                         if match_position:
@@ -862,7 +1003,7 @@ Album:"""
                             log_progress(f"Found {len(results)} results")
                             # Step 3: Analyze results and find best match
                             match_position = self.select_best_match(
-                                results, title, artist, preferences
+                                results, title, artist, album, preferences
                             )
                             
                             if match_position:

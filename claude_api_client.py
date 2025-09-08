@@ -25,7 +25,7 @@ except ImportError:
 
 # Import existing prompt templates
 try:
-    from music_parsing_prompts import STANDARD_MUSIC_PARSING_PROMPT, format_result_selection_prompt
+    from music_parsing_prompts import STANDARD_MUSIC_PARSING_PROMPT, ENHANCED_MUSIC_PARSING_PROMPT, format_result_selection_prompt
 except ImportError:
     # Fallback prompt if module not available
     STANDARD_MUSIC_PARSING_PROMPT = """
@@ -103,21 +103,22 @@ class ClaudeAPIClient:
             log_progress(f"🎯 Parsing request: '{request[:50]}...'")
             
             # Format the prompt with the actual request
-            prompt = STANDARD_MUSIC_PARSING_PROMPT.format(request=request)
+            prompt = ENHANCED_MUSIC_PARSING_PROMPT.format(request=request)
             
             # Add extra instructions to ensure JSON-only response
-            full_prompt = f"""IMPORTANT: Return ONLY valid JSON, no explanatory text.
+            #full_prompt = f"""IMPORTANT: Return ONLY valid JSON, no explanatory text.
 
-{prompt}
+#{prompt}
 
-Remember: Return ONLY the JSON object, nothing else."""
+#REMEMBER: Return ONLY the JSON object, nothing else."""
             
             # Call Claude API directly
             response = self.client.messages.create(
                 model=self.model,
                 max_tokens=200,
                 temperature=0.0,  # Deterministic parsing
-                messages=[{"role": "user", "content": full_prompt}]
+                #messages=[{"role": "user", "content": full_prompt}],
+                messages=[{"role": "user", "content": prompt}]
             )
             
             response_text = response.content[0].text.strip()
@@ -133,14 +134,19 @@ Remember: Return ONLY the JSON object, nothing else."""
                     raise ValueError("Response is not a JSON object")
                 
                 # Ensure required keys exist
-                if 'title' not in parsed_result:
-                    raise ValueError("Missing 'title' in response")
+                #if 'title' not in parsed_result:
+                #    raise ValueError("Missing 'title' in response")
 
-                other_keys = ['artist', 'preferences']
-                for key in other_keys:
-                    if key not in parsed_result:
-                        parsed_result[key] = None if key == 'artist' else {}
+                #other_keys = ['artist', 'preferences']
+                #for key in other_keys:
+                #    if key not in parsed_result:
+                #        parsed_result[key] = None if key == 'artist' else {}
+
+                keys = {'title', 'artist', 'album', 'preferences'}
+                if not keys.issubset(parsed_result.keys()):
+                    raise ValueError(f"Response missing required keys: {keys}")
                 
+                print(parsed_result)
                 return parsed_result
                 
             except json.JSONDecodeError as e:
@@ -187,7 +193,7 @@ Remember: Return ONLY the JSON object, nothing else."""
             
             # Use existing prompt template if available
             try:
-                prompt = format_result_selection_prompt(
+                prompt = format_result_selection_title_prompt(
                     title=target_title,
                     artist=target_artist,
                     preferences=preferences or {},
@@ -241,6 +247,84 @@ IMPORTANT: Return ONLY the position number (integer), no explanation or other te
             log_progress(f"❌ Unexpected error in selection: {str(e)}")
             return None
     
+    def select_best_album(self, results: List[Dict], target_album: str, 
+                         target_artist: str = None, preferences: Dict = None) -> Optional[int]:
+        """
+        Use Claude API to select the best album from search results.
+        
+        This replaces the unreliable Task function calls for result selection.
+        
+        Args:
+            results: List of search results with position, title, artist, album
+            target_album: Target song title
+            target_artist: Target artist name (optional)
+            preferences: User preferences dict (optional)
+            
+        Returns:
+            Position number of best match, or None if no good match
+        """
+        if not results:
+            return None
+            
+        try:
+            log_progress(f"🎯 Selecting best album from {len(results)} results")
+            
+            # Use existing prompt template if available
+            try:
+                prompt = format_result_selection_album_prompt(
+                    album=target_album,
+                    artist=target_artist,
+                    preferences=preferences or {},
+                    results=results
+                )
+            except (NameError, ImportError):
+                # Fallback prompt if template not available
+                prompt = self.create_selection_prompt(results, target_album, target_artist, preferences)
+            
+            if not prompt:
+                log_progress("❌ Could not create selection prompt")
+                return None
+            
+            # Add instructions for numeric response
+            full_prompt = f"""{prompt}
+
+IMPORTANT: Return ONLY the position number (integer), no explanation or other text."""
+            
+            # Call Claude API
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=10,
+                temperature=0.0,  # Deterministic selection
+                messages=[{"role": "user", "content": full_prompt}]
+            )
+            
+            response_text = response.content[0].text.strip()
+            log_progress(f"📝 Selection response: '{response_text}'")
+            
+            # Parse the position number
+            try:
+                position = int(response_text.split()[0])  # Get first number
+                
+                # Validate position is in results
+                valid_positions = [r.get('position') for r in results if 'position' in r]
+                if position in valid_positions:
+                    log_progress(f"✅ Selected position: {position}")
+                    return position
+                else:
+                    log_progress(f"❌ Invalid position {position}, valid positions: {valid_positions[:5]}")
+                    return None
+                    
+            except (ValueError, IndexError) as e:
+                log_progress(f"❌ Could not parse position from: '{response_text}' - {str(e)}")
+                return None
+                
+        except APIError as e:
+            log_progress(f"❌ API error in selection: {str(e)}")
+            return None
+        except Exception as e:
+            log_progress(f"❌ Unexpected error in selection: {str(e)}")
+            return None
+
     def _fallback_parse(self, request: str, api_response: str) -> Dict[str, Any]:
         """
         Fallback parsing when API returns non-JSON response.
