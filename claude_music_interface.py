@@ -110,7 +110,8 @@ def handle_music_request(user_request: str, api_client=None, verbose: bool = Fal
                     message += f"\n(Found {details['total_results']} total results)"
                 return message
             else:
-                return result['message']
+                queue_result = agent.execute_sonos_command(['sonos', 'showqueue'])
+                return result['message'] + "\n\nCurrent Queue:\n" + queue_result['output']
         else:
             if verbose:
                 error_details = result.get('details', {})
@@ -840,7 +841,8 @@ class MusicAgent:
         
         return queries
 
-    def get_album_for_song(self, title: str, artist: str = None) -> str:
+    # not in use right now but could be useful for future enhancement
+    def get_album_for_track(self, title: str, artist: str = None) -> str:
         """
         Use Claude API to identify the primary album that contains a specific song.
         
@@ -945,55 +947,7 @@ Album:"""
                         log_progress(f"sonos search[track/album] command failed: {search_result.get('error', 'Unknown error')}")
                     
                     # Check for API parsing failure in error message (since exceptions are caught by execute_sonos_command)
-                    if not search_result['success'] and search_result.get('error') and "string indices must be integers" in search_result['error']:
-                        log_progress(f"🚫 API parsing failed for query '{query}': {search_result['error']}")
-                        api_parsing_failed = True
-                        
-                        # Immediately try album lookup instead of continuing with broad searches
-                        if self.api_client:
-                            log_progress("🔍 API parsing failed, immediately trying LLM album lookup...")
-                            album_name = self.get_album_for_song(title, artist)
-                            
-                            if album_name:
-                                # Include artist in album search for better precision
-                                if artist:
-                                    album_search_query = f"{artist} {album_name}"
-                                    log_progress(f"🎵 Trying artist+album search: '{album_search_query}'")
-                                    album_search_result = self.execute_sonos_command(['sonos', 'searchtrack', artist, album_name])
-                                else:
-                                    log_progress(f"🎵 Trying album-only search: '{album_name}'")
-                                    album_search_result = self.execute_sonos_command(['sonos', 'searchtrack', album_name])
-                                
-                                if album_search_result['success'] and album_search_result['output'].strip():
-                                    results = self.parse_search_results(album_search_result['output'])
-                                    
-                                    if results:
-                                        log_progress(f"Found {len(results)} results from album search")
-                                        # For album search results, use programmatic matching for focused results
-                                        match_position = self.select_best_match(
-                                            results, title, artist, album, preferences
-                                        )
-                                        
-                                        if match_position:
-                                            log_progress(f"✅ Album-based search successful! Selected position {match_position}")
-                                            best_match = match_position
-                                            search_results = results
-                                            # Update successful query to show it used artist+album
-                                            if artist:
-                                                successful_query = f"album:{artist} {album_name}"
-                                            else:
-                                                successful_query = f"album:{album_name}"
-                                            break  # Exit the search loop - we found our match
-                                        else:
-                                            log_progress("No good match found in album search results")
-                                    else:
-                                        log_progress("Album search returned no valid results")
-                                else:
-                                    log_progress("Album search command failed")
-                            else:
-                                log_progress("❌ Could not determine album for immediate lookup")
-                        
-                        # Only continue with remaining queries if album lookup failed
+                    if not search_result['success']:
                         continue
                     
                     if search_result['success'] and search_result['output'].strip():
@@ -1072,71 +1026,3 @@ Album:"""
                 'details': {'error': str(e)}
             }
     
-#def get_current_track() -> str:
-#    """Get information about the currently playing track."""
-#    agent = MusicAgent()
-#    result = agent.get_current_track_info()
-#    
-#    if result['success']:
-#        return result['output']
-#    else:
-#        return f"❌ Could not get current track info: {result.get('error', 'Unknown error')}"
-#
-#
-## Convenience functions for common operations
-#def pause_music() -> str:
-#    """Pause music playback."""
-#    agent = MusicAgent()
-#    result = agent.execute_sonos_command(['sonos', 'pause'])
-#    return "⏸️ Paused" if result['success'] else f"❌ Failed to pause: {result.get('error')}"
-#
-#
-#def resume_music() -> str:
-#    """Resume music playback."""
-#    agent = MusicAgent()
-#    result = agent.execute_sonos_command(['sonos', 'resume'])
-#    return "▶️ Resumed" if result['success'] else f"❌ Failed to resume: {result.get('error')}"
-
-
-# Example usage demonstrations
-if __name__ == "__main__":
-    print("Testing Claude Code Music Interface")
-    print("=" * 50)
-    print("🚀 NEW LLM-POWERED APPROACH (Recommended for Claude Code):")
-    print("=" * 50)
-    
-    # Example of the new LLM-powered approach
-    # In Claude Code, you would first parse the natural language using Task subagent:
-    # parsed = Task("Parse music request", prompt="...", subagent_type="general-purpose")
-    # Then call: play_music_parsed(parsed['title'], parsed['artist'], parsed['preferences'])
-    
-    test_parsed_examples = [
-        ("fixing her hair", "ani difranco", {}),
-        ("harvest", "neil young", {}),
-        ("harvest", "neil young", {"prefer_live": True}),
-        ("harvest", "neil young", {"prefer_acoustic": True})
-    ]
-    
-    for title, artist, prefs in test_parsed_examples:
-        print(f"\n🎵 Testing parsed: title='{title}', artist='{artist}', prefs={prefs}")
-        result = play_music_parsed(title, artist, prefs, verbose=True)
-        print(f"Result: {result}")
-    
-    print("\n" + "=" * 50)
-    print("📜 LEGACY APPROACH (Regex-based, less reliable):")
-    print("=" * 50)
-    
-    # Test the legacy play_music function
-    test_requests = [
-        "ani difranco's fixing her hair",
-        "play harvest by neil young", 
-        "I want to hear a live version of harvest"
-    ]
-    
-    for request in test_requests:
-        print(f"\n🎵 Testing legacy: '{request}'")
-        result = play_music(request, verbose=True)
-        print(f"Result: {result}")
-    
-    print("\n📍 Current track:")
-    print(get_current_track())
