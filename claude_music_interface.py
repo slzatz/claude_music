@@ -791,7 +791,7 @@ class MusicAgent:
         title_variants = [title]
         
         # Create abbreviated versions that might avoid API issues
-        if title  > 2:
+        if len(title.split()) > 2:
             # Try removing small words that might cause parsing issues
             title_no_articles = re.sub(r'\b(the|a|an|her|his|my|your|our|their)\b', '', title, flags=re.IGNORECASE)
             title_no_articles = re.sub(r'\s+', ' ', title_no_articles).strip()
