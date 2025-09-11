@@ -13,7 +13,7 @@ from datetime import datetime
 
 try:
     import anthropic
-    from anthropic import APIError, APITimeoutError, RateLimitError
+    from anthropic import APIError, APITimeoutError, RateLimitError, APIStatusError
 except ImportError:
     raise ImportError("anthropic package not found. Install with: uv pip install anthropic")
 
@@ -105,19 +105,11 @@ class ClaudeAPIClient:
             # Format the prompt with the actual request
             prompt = ENHANCED_MUSIC_PARSING_PROMPT.format(request=request)
             
-            # Add extra instructions to ensure JSON-only response
-            #full_prompt = f"""IMPORTANT: Return ONLY valid JSON, no explanatory text.
-
-#{prompt}
-
-#REMEMBER: Return ONLY the JSON object, nothing else."""
-            
             # Call Claude API directly
             response = self.client.messages.create(
                 model=self.model,
                 max_tokens=200,
                 temperature=0.0,  # Deterministic parsing
-                #messages=[{"role": "user", "content": full_prompt}],
                 messages=[{"role": "user", "content": prompt}]
             )
             
@@ -132,21 +124,11 @@ class ClaudeAPIClient:
                 # Validate the response structure
                 if not isinstance(parsed_result, dict):
                     raise ValueError("Response is not a JSON object")
-                
-                # Ensure required keys exist
-                #if 'title' not in parsed_result:
-                #    raise ValueError("Missing 'title' in response")
-
-                #other_keys = ['artist', 'preferences']
-                #for key in other_keys:
-                #    if key not in parsed_result:
-                #        parsed_result[key] = None if key == 'artist' else {}
 
                 keys = {'title', 'artist', 'album', 'preferences'}
                 if not keys.issubset(parsed_result.keys()):
                     raise ValueError(f"Response missing required keys: {keys}")
                 
-                print(parsed_result)
                 return parsed_result
                 
             except json.JSONDecodeError as e:
@@ -155,7 +137,22 @@ class ClaudeAPIClient:
                 
                 # Try to extract information using regex as fallback
                 return self._fallback_parse(request, response_text)
-                
+
+        except APIStatusError as e:
+        # Check for the specific status code
+            if e.status_code == 529:
+                log_progress("❌ API error: HTTP 529 error. The API is temporarily overloaded.")
+                return {
+                    'error': 'HTTP 529 error. The API is temporarily overloaded',
+                }
+                # ? add retry logic here
+            else:
+                # Handle other HTTP errors
+                log_progress(f"❌ API Status Error: {e.status_code}. Details: {e.args}")
+                return {
+                    'error': f'API Status Error: {e.status_code}. Details: {e.args}',
+                }
+                # raise e        
         except APIError as e:
             log_progress(f"❌ API error: {str(e)}")
             return {

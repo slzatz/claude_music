@@ -80,10 +80,15 @@ def handle_music_request(user_request: str, api_client=None, verbose: bool = Fal
             log_progress(f"Parsing failed: {parsed['error']}")
             return f"❌ Could not understand request: {parsed['error']}"
         
-        #log_progress(f"Parsed: title='{parsed['title']}', artist='{parsed.get('artist', 'none')}'")
-        log_progress(f"Parsed: title='{parsed['title']}', artist='{parsed['artist']}', album='{parsed['album']}'")
+        title = parsed.get('title')
+        artist = parsed.get('artist')
+        album = parsed.get('album')
+        preferences = parsed.get('preferences', {})
+
+        log_progress(f"Parsed: title='{'title'}', artist='{'artist'}', album='{'album'}' preferences={preferences}")
+
         if not parsed['title']:
-            log_progress("No title parsed from request - presumed to be album search")
+            log_progress("No title parsed from request - presumed to be an album request")
             agent.album_search = True
         
         # Step 3: Generate queries, search, match and play 
@@ -323,14 +328,15 @@ class MusicAgent:
         """
         Parse a natural language music request using Claude API.
         
-        This method uses direct API calls for reliable, consistent parsing
-        when API client is available, otherwise falls back to simple regex parsing.
+        This method uses claude API calls when API client is available,
+        otherwise falls back to simple regex parsing.
         
         Args:
             request: Natural language music request (e.g., "play Bruce Springsteen's Thunder Road")
             
         Returns:
-            Dict with parsed components: {'title': str, 'artist': str|None, 'preferences': dict}
+            Dict with parsed components: {'title': str|None, 'artist': str|None, 
+                                         'album': str|None, 'preferences': dict}
         """
         if not self.api_client:
             log_progress("❌ No API client available - falling back to simple parsing")
@@ -764,7 +770,7 @@ class MusicAgent:
     # Search Query Generation Methods
     # ============================================================================
     
-    def generate_search_queries(self, title: str, artist: str = None, album: str = None, preferences: Dict[str, Any] = None) -> List[str]:
+    def generate_search_queries(self, title: str = None, artist: str = None, album: str = None, preferences: Dict[str, Any] = None) -> List[str]:
         """
         Generate intelligent search queries with fallback strategies for API issues.
         
@@ -772,74 +778,33 @@ class MusicAgent:
         alternative query formats that avoid the problematic pattern.
         
         Args:
-            title: Song title
-            artist: Artist name (optional)
+            title: Track title
+            artist: Artist name
+            album: Album name
             preferences: Search preferences
             
         Returns:
             Ordered list of search query strings to try
+        Called by search_match_play
         """
         log_progress("generate_search_queries")
         preferences = preferences or {}
-        queries = []
+        query = ""
         
-        if self.album_search: #not title:
-            queries.append(f"{artist if artist else ''} {album if album else ''}")
-            return queries
+        if self.album_search:
+            query = f"{artist if artist else ''} {album if album else ''}"
+        else:
+            query = f"{title} {artist if artist else ''} {album if album else ''}"
 
-        # Strategy for handling known API issues
-        # "fixing her hair" fails, but "fixing hair" works
-        title_variants = [title]
+        # Handle version preferences
+        if preferences.get('prefer_live'):
+            query = f"{query} live"
+        elif preferences.get('prefer_acoustic'):
+            query = f"{query} acoustic"
+        elif preferences.get('prefer_studio'):
+            query = f"{query} studio"
         
-        # Create abbreviated versions that might avoid API issues
-        if len(title.split()) > 2:
-            # Try removing small words that might cause parsing issues
-            title_no_articles = re.sub(r'\b(the|a|an|her|his|my|your|our|their)\b', '', title, flags=re.IGNORECASE)
-            title_no_articles = re.sub(r'\s+', ' ', title_no_articles).strip()
-            if title_no_articles and title_no_articles != title:
-                title_variants.append(title_no_articles)
-        
-        # Generate queries for each title variant
-        for title_var in title_variants:
-            if artist:
-                # Primary search strategies
-                queries.extend([
-                    f"{title_var} {artist}",
-                    f"{artist} {title_var}"
-                    #f"{title_var} by {artist}",
-                ])
-                
-                # Handle version preferences
-                if preferences.get('prefer_live'):
-                    #queries.insert(0, f"live {title_var} {artist}")
-                    queries.insert(0, f"{title_var} live {artist}")
-                    queries.insert(1, f"{artist} {title_var} live")
-                elif preferences.get('prefer_acoustic'):
-                    #queries.insert(0, f"acoustic {title_var} {artist}")
-                    queries.insert(0, f"{title_var} acoustic {artist}")
-                    queries.insert(1, f"{artist} {title_var} acoustic")
-                elif preferences.get('prefer_studio'):
-                    queries.insert(0, f"{title_var} {artist} studio")
-                    #queries.insert(1, f"{title_var} studio {artist}")
-                    #queries.insert(1, f"{title_var} studio {artist}")
-                
-                # Fallback: just artist name (to find any songs by them)
-                queries.append(artist)
-                
-            else:
-                # No artist specified
-                queries.append(title_var)
-                
-                if preferences.get('prefer_live'):
-                    #queries.insert(0, f"live {title_var}")
-                    queries.insert(0, f"{title_var} live")
-                elif preferences.get('prefer_acoustic'):
-                    #queries.insert(0, f"acoustic {title_var}")
-                    queries.insert(0, f"{title_var} acoustic")
-                elif preferences.get('prefer_studio'):
-                    queries.insert(0, f"{title_var} studio")
-        
-        return queries
+        return [query]
 
     # not in use right now but could be useful for future enhancement
     def get_album_for_track(self, title: str, artist: str = None) -> str:
@@ -910,8 +875,9 @@ Album:"""
         combining the best of both the base and enhanced implementations.
         
         Args:
-            title: Song title (required)
+            title: Song title (optional)
             artist: Artist name (optional)
+            album: Album name (optional)
             preferences: Playback preferences (optional)
             
         Returns:

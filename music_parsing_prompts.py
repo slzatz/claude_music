@@ -76,7 +76,7 @@ Special handling:
 
 Examples:
 - "Neil Young's Harvest from the Harvest album" → {{"title": "harvest", "artist": "neil young", "album": "harvest", "preferences": {{}}}}
-- "play a live version of harvest" → {{"title": "harvest", "artist": null, "album": null, "preferences": {{"prefer_live": true}}}}
+- "play a live version of harvest by neil young" → {{"title": "harvest", "artist": "neil young", "album": null, "preferences": {{"prefer_live": true}}}}
 - "play album dark side of the moon" by pink floyd → {{"title": null, "artist": "pink floyd", "album": "the dark side of the moon", "preferences": {{}}}}
 
 IMPORTANT: You MUST return ONLY a valid JSON object with exactly these keys: title, artist, album, preferences
@@ -89,7 +89,7 @@ Any one of title, artist, or album can be null if not clearly specified but at l
 
 Required JSON format:
 {{
-  "title": "song title herei or null",
+  "title": "song title here or null",
   "artist": "artist name here or null", 
   "album": "album name here or null",
   "preferences": {{}}
