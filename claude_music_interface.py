@@ -93,12 +93,7 @@ def handle_music_request(user_request: str, api_client=None, verbose: bool = Fal
         
         # Step 3: Generate queries, search, match and play 
         log_progress("Step 3: Generate queries, search, match and play")
-        result = agent.search_match_play(
-            parsed['title'], 
-            parsed['artist'], 
-            parsed['album'], 
-            parsed['preferences']
-        )
+        result = agent.search_match_play(title, artist, album, preferences)
         
         # Calculate total time
         elapsed = (datetime.now() - start_time).total_seconds()
