@@ -68,7 +68,7 @@ class ClaudeAPIClient:
     behavior of Claude Code's Task function.
     """
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "claude-3-5-sonnet-20241022"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "claude-4-sonnet-20250514"): #claude-3-5-sonnet-20241022
         """
         Initialize the Claude API client.
         
